@@ -1,0 +1,8 @@
+{
+  "name": "FairDee Admin TEST",
+  "description": "เครื่องมือสำหรับนายหน้าประกันภัยใช้สร้างพรอมต์โฆษณาประกันรถยนต์และแคปชัน Facebook ด้วย Template Engine ภายในเบราว์เซอร์",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

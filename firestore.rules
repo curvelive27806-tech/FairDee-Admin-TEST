@@ -1,0 +1,382 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened ID & Primitive Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwnerAdmin() {
+      return isSignedIn() && request.auth.token.email == 'curvelive27806@gmail.com';
+    }
+
+    function isAdmin() {
+      return isOwnerAdmin() || (
+        isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function isActiveAgentData(data) {
+      return data.role == 'agent' && data.status == 'approved';
+    }
+
+    function isActiveAdminData(data) {
+      return data.role == 'admin' && data.status == 'approved';
+    }
+
+    function quotaDocExists() {
+      return exists(/databases/$(database)/documents/system/memberQuotas);
+    }
+
+    function quotaBefore() {
+      return get(/databases/$(database)/documents/system/memberQuotas).data;
+    }
+
+    function quotaAfter() {
+      return getAfter(/databases/$(database)/documents/system/memberQuotas).data;
+    }
+
+    function isInvitedAdminSelfClaim(adminId) {
+      return isSignedIn() &&
+        adminId == request.auth.uid &&
+        incoming().email == request.auth.token.email &&
+        'invitedMemberId' in incoming() &&
+        isValidId(incoming().invitedMemberId) &&
+        exists(/databases/$(database)/documents/members/$(incoming().invitedMemberId)) &&
+        get(/databases/$(database)/documents/members/$(incoming().invitedMemberId)).data.role == 'admin' &&
+        get(/databases/$(database)/documents/members/$(incoming().invitedMemberId)).data.status == 'approved' &&
+        get(/databases/$(database)/documents/members/$(incoming().invitedMemberId)).data.email == request.auth.token.email;
+    }
+
+    function isValidAdminGrant(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'invitedByEmail', 'invitedMemberId', 'createdAt']) &&
+        isValidId(data.uid) &&
+        isValidString(data.email, 200) &&
+        (!('invitedByEmail' in data) || isValidString(data.invitedByEmail, 200)) &&
+        (!('invitedMemberId' in data) || isValidString(data.invitedMemberId, 128)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidMemberQuota(data) {
+      return data.keys().hasAll(['activeAgentCount', 'activeAdminCount', 'ownerEmail', 'updatedAt']) &&
+        data.keys().hasOnly(['activeAgentCount', 'activeAdminCount', 'ownerEmail', 'updatedAt']) &&
+        data.activeAgentCount is int &&
+        data.activeAgentCount >= 0 &&
+        data.activeAgentCount <= 200 &&
+        data.activeAdminCount is int &&
+        data.activeAdminCount >= 0 &&
+        data.activeAdminCount <= 10 &&
+        data.ownerEmail == 'curvelive27806@gmail.com' &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMemberProfile(data) {
+      return data.keys().hasAll([
+          'id', 'authUid', 'fullName', 'fmCode', 'email', 'phone',
+          'role', 'status', 'fmVerified', 'authMethod', 'reviewedNote',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'authUid', 'fullName', 'fmCode', 'email', 'phone',
+          'role', 'status', 'fmVerified', 'authMethod', 'isSystemOwner',
+          'invitedByEmail', 'reviewedNote', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.authUid, 128) &&
+        isValidString(data.fullName, 150) && data.fullName.size() >= 1 &&
+        isValidString(data.fmCode, 64) &&
+        isValidString(data.email, 200) &&
+        isValidString(data.phone, 40) &&
+        data.role in ['agent', 'admin'] &&
+        data.status in ['pending', 'approved', 'rejected', 'suspended'] &&
+        data.fmVerified is bool &&
+        data.authMethod in ['google-firebase', 'google-prototype'] &&
+        (!('isSystemOwner' in data) || data.isSystemOwner is bool) &&
+        (!('invitedByEmail' in data) || isValidString(data.invitedByEmail, 200)) &&
+        isValidString(data.reviewedNote, 500) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function checkMemberCreateQuota() {
+      return (
+        (!isActiveAgentData(incoming()) && !isActiveAdminData(incoming())) ||
+        (
+          quotaDocExists() &&
+          quotaAfter().activeAgentCount == quotaBefore().activeAgentCount + (isActiveAgentData(incoming()) ? 1 : 0) &&
+          quotaAfter().activeAdminCount == quotaBefore().activeAdminCount + (isActiveAdminData(incoming()) ? 1 : 0) &&
+          quotaAfter().activeAgentCount <= 200 &&
+          quotaAfter().activeAdminCount <= 10
+        ) ||
+        (
+          !quotaDocExists() &&
+          isOwnerAdmin() &&
+          quotaAfter().activeAgentCount <= 200 &&
+          quotaAfter().activeAdminCount <= 10
+        )
+      );
+    }
+
+    function checkMemberUpdateQuota() {
+      return (
+        (
+          isActiveAgentData(incoming()) == isActiveAgentData(existing()) &&
+          isActiveAdminData(incoming()) == isActiveAdminData(existing())
+        ) ||
+        (
+          quotaDocExists() &&
+          quotaAfter().activeAgentCount == quotaBefore().activeAgentCount +
+            (isActiveAgentData(incoming()) ? 1 : 0) -
+            (isActiveAgentData(existing()) ? 1 : 0) &&
+          quotaAfter().activeAdminCount == quotaBefore().activeAdminCount +
+            (isActiveAdminData(incoming()) ? 1 : 0) -
+            (isActiveAdminData(existing()) ? 1 : 0) &&
+          quotaAfter().activeAgentCount <= 200 &&
+          quotaAfter().activeAdminCount <= 10
+        )
+      );
+    }
+
+    function checkMemberDeleteQuota() {
+      return (
+        (!isActiveAgentData(existing()) && !isActiveAdminData(existing())) ||
+        (
+          quotaDocExists() &&
+          quotaAfter().activeAgentCount == quotaBefore().activeAgentCount - (isActiveAgentData(existing()) ? 1 : 0) &&
+          quotaAfter().activeAdminCount == quotaBefore().activeAdminCount - (isActiveAdminData(existing()) ? 1 : 0)
+        )
+      );
+    }
+
+    function isValidPackage(data) {
+      return data.keys().hasAll([
+          'id', 'companyName', 'insuranceClass', 'packageName', 'repairType',
+          'carBrand', 'carModel', 'carYear', 'carAge',
+          'sumInsured', 'sumInsuredNumeric', 'annualPremium', 'annualPremiumNumeric',
+          'installmentMonths', 'installmentAmount', 'installmentTerms',
+          'deductible', 'floodCoverage', 'rolloverCoverage', 'fireCoverage',
+          'theftCoverage', 'otherCoverage', 'exclusions', 'expiryDate',
+          'status', 'isSamplePrototype', 'sourceFileName', 'reviewerNote',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'companyName', 'insuranceClass', 'packageName', 'repairType',
+          'carBrand', 'carModel', 'carYear', 'carAge', 'vehicleUsageCondition',
+          'sumInsured', 'sumInsuredNumeric', 'annualPremium', 'annualPremiumNumeric',
+          'netPremium', 'netPremiumHeader', 'totalPremium', 'totalPremiumHeader',
+          'prbPremium', 'prbPremiumHeader', 'totalWithPrbPremium', 'totalWithPrbPremiumHeader',
+          'selectedAnnualPremiumColumn', 'selectedAnnualPremiumHeader',
+          'installmentMonths', 'installmentAmount', 'installmentTerms',
+          'deductible', 'floodCoverage', 'rolloverCoverage', 'fireCoverage',
+          'theftCoverage', 'otherCoverage', 'exclusions', 'expiryDate',
+          'status', 'isSamplePrototype', 'sourceFileName', 'sourceSheetName',
+          'sourceRowNumber', 'priceCode', 'docCode', 'pageNumber', 'importBatchId',
+          'sourceDocAnchor', 'sourceDocCatalogId', 'sourceDocTitle',
+          'verifiedAnnualPremium', 'verifiedSumInsured', 'verifiedInstallmentAmount',
+          'isValuesVerifiedByAdmin', 'verifiedAt', 'approvedByEmail', 'createdByUid',
+          'reviewerNote', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.companyName, 200) &&
+        data.insuranceClass in ['ชั้น 1', '2+', '3+', 'ชั้น 2', 'ชั้น 3', 'อื่น ๆ', ''] &&
+        isValidString(data.packageName, 300) &&
+        data.repairType in ['ซ่อมห้าง', 'ซ่อมอู่', ''] &&
+        isValidString(data.carBrand, 200) &&
+        isValidString(data.carModel, 200) &&
+        isValidString(data.carYear, 60) &&
+        isValidString(data.carAge, 100) &&
+        (!('vehicleUsageCondition' in data) || isValidString(data.vehicleUsageCondition, 250)) &&
+        isValidString(data.sumInsured, 120) &&
+        (data.sumInsuredNumeric is number && data.sumInsuredNumeric >= 0) &&
+        isValidString(data.annualPremium, 120) &&
+        (data.annualPremiumNumeric is number && data.annualPremiumNumeric >= 0) &&
+        (!('netPremium' in data) || isValidString(data.netPremium, 120)) &&
+        (!('netPremiumHeader' in data) || isValidString(data.netPremiumHeader, 120)) &&
+        (!('totalPremium' in data) || isValidString(data.totalPremium, 120)) &&
+        (!('totalPremiumHeader' in data) || isValidString(data.totalPremiumHeader, 120)) &&
+        (!('prbPremium' in data) || isValidString(data.prbPremium, 120)) &&
+        (!('prbPremiumHeader' in data) || isValidString(data.prbPremiumHeader, 120)) &&
+        (!('totalWithPrbPremium' in data) || isValidString(data.totalWithPrbPremium, 120)) &&
+        (!('totalWithPrbPremiumHeader' in data) || isValidString(data.totalWithPrbPremiumHeader, 120)) &&
+        (!('selectedAnnualPremiumColumn' in data) || data.selectedAnnualPremiumColumn in ['netPremium', 'totalPremium', 'totalWithPrbPremium', '']) &&
+        (!('selectedAnnualPremiumHeader' in data) || isValidString(data.selectedAnnualPremiumHeader, 120)) &&
+        isValidString(data.installmentMonths, 60) &&
+        isValidString(data.installmentAmount, 120) &&
+        isValidString(data.installmentTerms, 300) &&
+        isValidString(data.deductible, 300) &&
+        isValidString(data.floodCoverage, 300) &&
+        isValidString(data.rolloverCoverage, 300) &&
+        isValidString(data.fireCoverage, 300) &&
+        isValidString(data.theftCoverage, 300) &&
+        isValidString(data.otherCoverage, 600) &&
+        isValidString(data.exclusions, 600) &&
+        isValidString(data.expiryDate, 32) &&
+        data.status in ['pending', 'approved', 'expired'] &&
+        data.isSamplePrototype is bool &&
+        isValidString(data.sourceFileName, 250) &&
+        (!('sourceSheetName' in data) || isValidString(data.sourceSheetName, 120)) &&
+        (!('sourceRowNumber' in data) || (data.sourceRowNumber is number && data.sourceRowNumber >= 0)) &&
+        (!('priceCode' in data) || isValidString(data.priceCode, 100)) &&
+        (!('docCode' in data) || isValidString(data.docCode, 100)) &&
+        (!('pageNumber' in data) || isValidString(data.pageNumber, 40)) &&
+        (!('importBatchId' in data) || isValidString(data.importBatchId, 100)) &&
+        (!('sourceDocAnchor' in data) || isValidString(data.sourceDocAnchor, 120)) &&
+        (!('sourceDocCatalogId' in data) || isValidString(data.sourceDocCatalogId, 120)) &&
+        (!('sourceDocTitle' in data) || isValidString(data.sourceDocTitle, 300)) &&
+        (!('verifiedAnnualPremium' in data) || isValidString(data.verifiedAnnualPremium, 120)) &&
+        (!('verifiedSumInsured' in data) || isValidString(data.verifiedSumInsured, 120)) &&
+        (!('verifiedInstallmentAmount' in data) || isValidString(data.verifiedInstallmentAmount, 120)) &&
+        (!('isValuesVerifiedByAdmin' in data) || data.isValuesVerifiedByAdmin is bool) &&
+        (!('verifiedAt' in data) || isValidString(data.verifiedAt, 64)) &&
+        (!('approvedByEmail' in data) || isValidString(data.approvedByEmail, 200)) &&
+        (!('createdByUid' in data) || isValidString(data.createdByUid, 128)) &&
+        isValidString(data.reviewerNote, 800) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Collection: /system/{systemDocId} (Server-enforced central quotas)
+    match /system/{systemDocId} {
+      allow get: if systemDocId == 'memberQuotas' && isAdmin();
+      allow list: if false;
+      allow create: if systemDocId == 'memberQuotas' &&
+        isOwnerAdmin() &&
+        isValidMemberQuota(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if systemDocId == 'memberQuotas' &&
+        isAdmin() &&
+        isValidMemberQuota(incoming()) &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().updatedAt == request.time &&
+        (incoming().activeAdminCount == existing().activeAdminCount || isOwnerAdmin());
+      allow delete: if false;
+    }
+
+    // Collection: /admins/{adminId} (Owner-controlled Admin role grants + pre-invited claim)
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isAdmin() || (isSignedIn() && request.auth.uid == adminId));
+      allow list: if isAdmin();
+      allow create: if isValidId(adminId) && isValidAdminGrant(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdAt == request.time &&
+        (isOwnerAdmin() || isInvitedAdminSelfClaim(adminId));
+      allow update: if isValidId(adminId) && isOwnerAdmin() && isValidAdminGrant(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(adminId) && isOwnerAdmin() && adminId != request.auth.uid;
+    }
+
+    // Collection: /members/{memberId} (PII Isolated + Zero Self-Escalation + Atomic 200/10 Quotas)
+    match /members/{memberId} {
+      allow get: if isValidId(memberId) && (
+        isAdmin() ||
+        (isSignedIn() && (existing().authUid == request.auth.uid || existing().email == request.auth.token.email))
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && (resource.data.authUid == request.auth.uid || resource.data.email == request.auth.token.email)
+      );
+      allow create: if isValidId(memberId) && isValidMemberProfile(incoming()) &&
+        incoming().id == memberId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          (
+            isAdmin() &&
+            (incoming().role != 'admin' || isOwnerAdmin()) &&
+            checkMemberCreateQuota()
+          ) ||
+          (
+            isSignedIn() &&
+            memberId == request.auth.uid &&
+            incoming().authUid == request.auth.uid &&
+            incoming().email == request.auth.token.email &&
+            incoming().role == 'agent' &&
+            incoming().status == 'pending' &&
+            incoming().fmVerified == false
+          )
+        );
+      allow update: if isValidId(memberId) && isValidMemberProfile(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            isAdmin() &&
+            (
+              existing().email != 'curvelive27806@gmail.com' ||
+              (incoming().role == 'admin' && incoming().status == 'approved')
+            ) &&
+            (
+              (existing().role == 'agent' && incoming().role == 'agent') ||
+              isOwnerAdmin()
+            ) &&
+            checkMemberUpdateQuota()
+          ) ||
+          (
+            isSignedIn() &&
+            existing().authUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phone', 'fmCode', 'updatedAt'])
+          ) ||
+          (
+            isSignedIn() &&
+            existing().authUid == '' &&
+            existing().email == request.auth.token.email &&
+            incoming().authUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['authUid', 'authMethod', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(memberId) &&
+        isAdmin() &&
+        existing().email != 'curvelive27806@gmail.com' &&
+        (existing().role != 'admin' || isOwnerAdmin()) &&
+        checkMemberDeleteQuota();
+    }
+
+    // Collection: /packages/{packageId} (Single Shared Repository for Admin Dashboard & Broker Library)
+    match /packages/{packageId} {
+      allow get: if isValidId(packageId) && (
+        isAdmin() ||
+        (isSignedIn() && existing().status == 'approved')
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && resource.data.status == 'approved'
+      );
+      allow create: if isAdmin() && isValidId(packageId) && isValidPackage(incoming()) &&
+        incoming().id == packageId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(packageId) && isValidPackage(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(packageId) && isAdmin();
+    }
+
+    // Startup connection validation doc (read-only ping)
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list, write: if false;
+    }
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Authorized admin UID registry document controlling package & member governance",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "invitedByEmail": { "type": "string", "maxLength": 200 },
+        "invitedMemberId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "SystemMemberQuota": {
+      "title": "SystemMemberQuota",
+      "description": "Server-enforced central quota counters capping approved active agents (200) and admins (10)",
+      "type": "object",
+      "properties": {
+        "activeAgentCount": { "type": "number", "minimum": 0, "maximum": 200 },
+        "activeAdminCount": { "type": "number", "minimum": 0, "maximum": 10 },
+        "ownerEmail": { "type": "string", "format": "email", "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["activeAgentCount", "activeAdminCount", "ownerEmail", "updatedAt"]
+    },
+    "MemberProfile": {
+      "title": "MemberProfile",
+      "description": "Registered broker or admin account with approval status, role, and FM verification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authUid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "fmCode": { "type": "string", "maxLength": 64 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "role": { "type": "string", "enum": ["agent", "admin"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "suspended"] },
+        "fmVerified": { "type": "boolean" },
+        "authMethod": { "type": "string", "enum": ["google-firebase", "google-prototype"] },
+        "isSystemOwner": { "type": "boolean" },
+        "invitedByEmail": { "type": "string", "maxLength": 200 },
+        "reviewedNote": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "authUid",
+        "fullName",
+        "fmCode",
+        "email",
+        "phone",
+        "role",
+        "status",
+        "fmVerified",
+        "authMethod",
+        "reviewedNote",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InsurancePackageRecord": {
+      "title": "InsurancePackageRecord",
+      "description": "Shared motor insurance package lifecycle record (import -> review/verify -> approve -> broker library)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyName": { "type": "string", "maxLength": 200 },
+        "insuranceClass": { "type": "string", "enum": ["ชั้น 1", "2+", "3+", "ชั้น 2", "ชั้น 3", "อื่น ๆ", ""] },
+        "packageName": { "type": "string", "maxLength": 300 },
+        "repairType": { "type": "string", "enum": ["ซ่อมห้าง", "ซ่อมอู่", ""] },
+        "carBrand": { "type": "string", "maxLength": 200 },
+        "carModel": { "type": "string", "maxLength": 200 },
+        "carYear": { "type": "string", "maxLength": 60 },
+        "carAge": { "type": "string", "maxLength": 100 },
+        "vehicleUsageCondition": { "type": "string", "maxLength": 250 },
+        "sumInsured": { "type": "string", "maxLength": 120 },
+        "sumInsuredNumeric": { "type": "number" },
+        "annualPremium": { "type": "string", "maxLength": 120 },
+        "annualPremiumNumeric": { "type": "number" },
+        "netPremium": { "type": "string", "maxLength": 120 },
+        "netPremiumHeader": { "type": "string", "maxLength": 120 },
+        "totalPremium": { "type": "string", "maxLength": 120 },
+        "totalPremiumHeader": { "type": "string", "maxLength": 120 },
+        "prbPremium": { "type": "string", "maxLength": 120 },
+        "prbPremiumHeader": { "type": "string", "maxLength": 120 },
+        "totalWithPrbPremium": { "type": "string", "maxLength": 120 },
+        "totalWithPrbPremiumHeader": { "type": "string", "maxLength": 120 },
+        "selectedAnnualPremiumColumn": { "type": "string", "enum": ["netPremium", "totalPremium", "totalWithPrbPremium", ""] },
+        "selectedAnnualPremiumHeader": { "type": "string", "maxLength": 120 },
+        "installmentMonths": { "type": "string", "maxLength": 60 },
+        "installmentAmount": { "type": "string", "maxLength": 120 },
+        "installmentTerms": { "type": "string", "maxLength": 300 },
+        "deductible": { "type": "string", "maxLength": 300 },
+        "floodCoverage": { "type": "string", "maxLength": 300 },
+        "rolloverCoverage": { "type": "string", "maxLength": 300 },
+        "fireCoverage": { "type": "string", "maxLength": 300 },
+        "theftCoverage": { "type": "string", "maxLength": 300 },
+        "otherCoverage": { "type": "string", "maxLength": 600 },
+        "exclusions": { "type": "string", "maxLength": 600 },
+        "expiryDate": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["pending", "approved", "expired"] },
+        "isSamplePrototype": { "type": "boolean" },
+        "sourceFileName": { "type": "string", "maxLength": 250 },
+        "sourceSheetName": { "type": "string", "maxLength": 120 },
+        "sourceRowNumber": { "type": "number" },
+        "priceCode": { "type": "string", "maxLength": 100 },
+        "docCode": { "type": "string", "maxLength": 100 },
+        "pageNumber": { "type": "string", "maxLength": 40 },
+        "importBatchId": { "type": "string", "maxLength": 100 },
+        "sourceDocAnchor": { "type": "string", "maxLength": 120 },
+        "sourceDocCatalogId": { "type": "string", "maxLength": 120 },
+        "sourceDocTitle": { "type": "string", "maxLength": 300 },
+        "verifiedAnnualPremium": { "type": "string", "maxLength": 120 },
+        "verifiedSumInsured": { "type": "string", "maxLength": 120 },
+        "verifiedInstallmentAmount": { "type": "string", "maxLength": 120 },
+        "isValuesVerifiedByAdmin": { "type": "boolean" },
+        "verifiedAt": { "type": "string", "maxLength": 64 },
+        "approvedByEmail": { "type": "string", "maxLength": 200 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "reviewerNote": { "type": "string", "maxLength": 800 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "companyName",
+        "insuranceClass",
+        "packageName",
+        "repairType",
+        "carBrand",
+        "carModel",
+        "carYear",
+        "carAge",
+        "sumInsured",
+        "sumInsuredNumeric",
+        "annualPremium",
+        "annualPremiumNumeric",
+        "installmentMonths",
+        "installmentAmount",
+        "installmentTerms",
+        "deductible",
+        "floodCoverage",
+        "rolloverCoverage",
+        "fireCoverage",
+        "theftCoverage",
+        "otherCoverage",
+        "exclusions",
+        "expiryDate",
+        "status",
+        "isSamplePrototype",
+        "sourceFileName",
+        "reviewerNote",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Trusted admin role grant registry verified in Firestore security rules"
+    },
+    "/system/{systemDocId}": {
+      "schema": { "$ref": "#/entities/SystemMemberQuota" },
+      "description": "Atomic quota counters (/system/memberQuotas) capping active agents at 200 and active admins at 10"
+    },
+    "/members/{memberId}": {
+      "schema": { "$ref": "#/entities/MemberProfile" },
+      "description": "Registered member profiles and RBAC statuses shared across admin and broker sessions"
+    },
+    "/packages/{packageId}": {
+      "schema": { "$ref": "#/entities/InsurancePackageRecord" },
+      "description": "Shared canonical motor insurance package repository linking Admin Dashboard and Broker Library"
+    }
+  }
+}
